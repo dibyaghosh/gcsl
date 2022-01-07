@@ -115,10 +115,12 @@ class GCSL:
         self.batch_size = batch_size
         self.n_accumulations = n_accumulations
         self.policy_updates_per_step = policy_updates_per_step
-        self.policy_optimizer = torch.optim.Adam(self.policy.parameters(), lr=lr)
-
+        self.policy_optimizer = torch.optim.Adam(self.policy.net.parameters(), lr=lr)
+        self.m_policy_optimizer = torch.optim.Adam(self.policy.marg_net.parameters() , lr = 5e-4)
+        #pdb.set_trace()
         self.log_tensorboard = log_tensorboard and tensorboard_enabled
         self.summary_writer = None
+
 
     def loss_fn(self, observations, goals, actions, horizons, weights):
         obs_dtype = torch.float32
@@ -171,7 +173,7 @@ class GCSL:
 
         avg_loss = 0
         self.policy_optimizer.zero_grad()
-
+        self.m_policy_optimizer.zero_grad()
         for _ in range(self.n_accumulations):
             observations, actions, goals, _, horizons, weights = buffer.sample_batch(self.batch_size)
             loss = self.loss_fn(observations, goals, actions, horizons, weights)
@@ -183,6 +185,9 @@ class GCSL:
             avg_loss += ptu.to_numpy(loss)
 
         self.policy_optimizer.step()
+        self.m_policy_optimizer.step()
+        ## Soft Update of target network
+        self.policy.soft_update(tau = 0.01)
 
         return avg_loss / self.n_accumulations
 
@@ -241,7 +246,7 @@ class GCSL:
 
         # Evaluation Code
         self.policy.eval()
-        self.evaluate_policy(self.eval_episodes, total_timesteps=0, greedy=True, prefix='Eval')
+        self.evaluate_policy(self.eval_episodes, total_timesteps=0, greedy=False, prefix='Eval')
         logger.record_tabular('policy loss', 0)
         logger.record_tabular('timesteps', total_timesteps)
         logger.record_tabular('epoch time (s)', time.time() - last_time)
@@ -257,7 +262,7 @@ class GCSL:
                 if total_timesteps < self.explore_timesteps:
                     states, actions, goal_state = self.sample_trajectory(noise=1)
                 else:
-                    states, actions, goal_state = self.sample_trajectory(greedy=True, noise=self.expl_noise)
+                    states, actions, goal_state = self.sample_trajectory(greedy=False, noise=self.expl_noise)
 
                 # With some probability, put this new trajectory into the validation buffer
                 if self.validation_buffer is not None and np.random.rand() < 0.2:
@@ -301,7 +306,7 @@ class GCSL:
                     iteration += 1
                     # Evaluation Code
                     self.policy.eval()
-                    self.evaluate_policy(self.eval_episodes, total_timesteps=total_timesteps, greedy=True,
+                    self.evaluate_policy(self.eval_episodes, total_timesteps=total_timesteps, greedy=False,
                                          prefix='Eval')
                     logger.record_tabular('policy loss', running_loss or 0)  # Handling None case
                     logger.record_tabular('timesteps', total_timesteps)
@@ -327,7 +332,7 @@ class GCSL:
 
                     ranger.reset()
 
-    def evaluate_policy(self, eval_episodes=200, greedy=True, prefix='Eval', total_timesteps=0):
+    def evaluate_policy(self, eval_episodes=200, greedy=False, prefix='Eval', total_timesteps=0):
         env = self.env
 
         all_states = []

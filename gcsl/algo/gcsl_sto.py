@@ -3,7 +3,7 @@ from rlutil.logging import logger
 
 import rlutil.torch as torch
 import rlutil.torch.pytorch_util as ptu
-import pdb
+
 import time
 import tqdm
 import os.path as osp
@@ -131,7 +131,6 @@ class GCSL:
         weights_torch = torch.tensor(weights, dtype=torch.float32)
 
         conditional_nll = self.policy.nll(observations_torch, goals_torch, actions_torch, horizon=horizons_torch)
-
         nll = conditional_nll
 
         return torch.mean(nll * weights_torch)
@@ -175,11 +174,7 @@ class GCSL:
         for _ in range(self.n_accumulations):
             observations, actions, goals, _, horizons, weights = buffer.sample_batch(self.batch_size)
             loss = self.loss_fn(observations, goals, actions, horizons, weights)
-
             loss.backward()
-            #torch.nn.utils.clip_grad_norm_(self.policy.parameters(), 1)
-            if loss.isnan().any():
-                pdb.set_trace()
             avg_loss += ptu.to_numpy(loss)
 
         self.policy_optimizer.step()
@@ -241,7 +236,7 @@ class GCSL:
 
         # Evaluation Code
         self.policy.eval()
-        self.evaluate_policy(self.eval_episodes, total_timesteps=0, greedy=True, prefix='Eval')
+        self.evaluate_policy(self.eval_episodes, total_timesteps=0, greedy=False, prefix='Eval')
         logger.record_tabular('policy loss', 0)
         logger.record_tabular('timesteps', total_timesteps)
         logger.record_tabular('epoch time (s)', time.time() - last_time)
@@ -257,7 +252,7 @@ class GCSL:
                 if total_timesteps < self.explore_timesteps:
                     states, actions, goal_state = self.sample_trajectory(noise=1)
                 else:
-                    states, actions, goal_state = self.sample_trajectory(greedy=True, noise=self.expl_noise)
+                    states, actions, goal_state = self.sample_trajectory(greedy=False, noise=self.expl_noise)
 
                 # With some probability, put this new trajectory into the validation buffer
                 if self.validation_buffer is not None and np.random.rand() < 0.2:
@@ -301,7 +296,7 @@ class GCSL:
                     iteration += 1
                     # Evaluation Code
                     self.policy.eval()
-                    self.evaluate_policy(self.eval_episodes, total_timesteps=total_timesteps, greedy=True,
+                    self.evaluate_policy(self.eval_episodes, total_timesteps=total_timesteps, greedy=False,
                                          prefix='Eval')
                     logger.record_tabular('policy loss', running_loss or 0)  # Handling None case
                     logger.record_tabular('timesteps', total_timesteps)

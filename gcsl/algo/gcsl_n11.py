@@ -115,10 +115,12 @@ class GCSL:
         self.batch_size = batch_size
         self.n_accumulations = n_accumulations
         self.policy_updates_per_step = policy_updates_per_step
-        self.policy_optimizer = torch.optim.Adam(self.policy.parameters(), lr=lr)
-
+        self.policy_optimizer = torch.optim.Adam(self.policy.net.parameters(), lr=lr)
+        self.m_policy_optimizer = torch.optim.Adam(self.policy.marg_net.parameters() , lr = 5e-4)
+        #pdb.set_trace()
         self.log_tensorboard = log_tensorboard and tensorboard_enabled
         self.summary_writer = None
+
 
     def loss_fn(self, observations, goals, actions, horizons, weights):
         obs_dtype = torch.float32
@@ -171,7 +173,7 @@ class GCSL:
 
         avg_loss = 0
         self.policy_optimizer.zero_grad()
-
+        self.m_policy_optimizer.zero_grad()
         for _ in range(self.n_accumulations):
             observations, actions, goals, _, horizons, weights = buffer.sample_batch(self.batch_size)
             loss = self.loss_fn(observations, goals, actions, horizons, weights)
@@ -183,6 +185,9 @@ class GCSL:
             avg_loss += ptu.to_numpy(loss)
 
         self.policy_optimizer.step()
+        self.m_policy_optimizer.step()
+        ## Soft Update of target network
+        self.policy.soft_update(tau = 0.01)
 
         return avg_loss / self.n_accumulations
 

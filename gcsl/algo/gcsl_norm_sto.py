@@ -241,7 +241,7 @@ class GCSL:
 
         # Evaluation Code
         self.policy.eval()
-        self.evaluate_policy(self.eval_episodes, total_timesteps=0, greedy=True, prefix='Eval')
+        self.evaluate_policy(self.eval_episodes, total_timesteps=0, greedy=False, prefix='Eval')
         logger.record_tabular('policy loss', 0)
         logger.record_tabular('timesteps', total_timesteps)
         logger.record_tabular('epoch time (s)', time.time() - last_time)
@@ -257,7 +257,7 @@ class GCSL:
                 if total_timesteps < self.explore_timesteps:
                     states, actions, goal_state = self.sample_trajectory(noise=1)
                 else:
-                    states, actions, goal_state = self.sample_trajectory(greedy=True, noise=self.expl_noise)
+                    states, actions, goal_state = self.sample_trajectory(greedy=False, noise=self.expl_noise)
 
                 # With some probability, put this new trajectory into the validation buffer
                 if self.validation_buffer is not None and np.random.rand() < 0.2:
@@ -301,7 +301,7 @@ class GCSL:
                     iteration += 1
                     # Evaluation Code
                     self.policy.eval()
-                    self.evaluate_policy(self.eval_episodes, total_timesteps=total_timesteps, greedy=True,
+                    self.evaluate_policy(self.eval_episodes, total_timesteps=total_timesteps, greedy=False,
                                          prefix='Eval')
                     logger.record_tabular('policy loss', running_loss or 0)  # Handling None case
                     logger.record_tabular('timesteps', total_timesteps)
@@ -327,7 +327,7 @@ class GCSL:
 
                     ranger.reset()
 
-    def evaluate_policy(self, eval_episodes=200, greedy=True, prefix='Eval', total_timesteps=0):
+    def evaluate_policy(self, eval_episodes=200, greedy=False, prefix='Eval', total_timesteps=0):
         env = self.env
 
         all_states = []

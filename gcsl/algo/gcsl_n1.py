@@ -120,6 +120,7 @@ class GCSL:
         self.log_tensorboard = log_tensorboard and tensorboard_enabled
         self.summary_writer = None
 
+
     def loss_fn(self, observations, goals, actions, horizons, weights):
         obs_dtype = torch.float32
         action_dtype = torch.int64 if self.is_discrete_action else torch.float32

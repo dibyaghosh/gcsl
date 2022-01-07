@@ -1,5 +1,6 @@
 import doodad as dd
 import gcsl.doodad_utils as dd_utils
+import argparse
 
 def run(output_dir='/tmp', env_name='pointmass_empty', gpu=True, seed=0, **kwargs):
 
@@ -16,7 +17,7 @@ def run(output_dir='/tmp', env_name='pointmass_empty', gpu=True, seed=0, **kwarg
     from gcsl.envs.env_utils import DiscretizedActionEnv
 
     # Algo
-    from gcsl.algo import buffer, gcsl, variants, networks
+    from gcsl.algo import buffer, gcsl, variants, networks,gcsl_sto
 
     ptu.set_gpu(gpu)
     if not gpu:
@@ -30,6 +31,14 @@ def run(output_dir='/tmp', env_name='pointmass_empty', gpu=True, seed=0, **kwarg
     print(env_params)
 
     env, policy, replay_buffer, gcsl_kwargs = variants.get_params(env, env_params)
+    '''''
+    algo = gcsl.GCSL(
+        env,
+        policy,
+        replay_buffer,
+        **gcsl_kwargs
+    )
+    '''''
     algo = gcsl.GCSL(
         env,
         policy,
@@ -37,16 +46,23 @@ def run(output_dir='/tmp', env_name='pointmass_empty', gpu=True, seed=0, **kwarg
         **gcsl_kwargs
     )
 
-    exp_prefix = 'example/%s/gcsl/' % (env_name,)
+    exp_prefix = 'example/%s/gcsl_od/' % (env_name,)
 
     with log_utils.setup_logger(exp_prefix=exp_prefix, log_base_dir=output_dir):
         algo.train()
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-S", "--seed", default='0')
+    parser.add_argument("-E", "--env", default='pointmass_empty')
+
+    args = parser.parse_args()
+    seed = int(args.seed)
+    env = args.env
     params = {
-        'seed': [0],
-        'env_name': ['pointmass_empty'], #['lunar', 'pointmass_empty','pointmass_rooms', 'pusher', 'claw', 'door'],
+        'seed': [seed],
+        'env_name':[env], #['lunar', 'pointmass_empty','pointmass_rooms', 'pusher', 'claw', 'door'],
         'gpu': [True],
     }
     dd_utils.launch(run, params, mode='local', instance_type='c4.xlarge')

@@ -39,6 +39,29 @@ class FCNetwork(nn.Module):
     def forward(self, states):
         return self.network(states)
 
+class FCNetwork_m(nn.Module):
+    """
+    A fully-connected network module
+    """
+
+    def __init__(self, dim_input, dim_output, layers=[256, 256],
+                 nonlinearity=torch.nn.ReLU, dropout=0):
+        super(FCNetwork_m, self).__init__()
+        net_layers = []
+        dim = dim_input
+        for i, layer_size in enumerate(layers):
+            net_layers.append(torch.nn.Linear(dim, layer_size))
+            net_layers.append(nonlinearity())
+            if dropout > 0:
+                net_layers.append(torch.nn.Dropout(0.4))
+            dim = layer_size
+        net_layers.append(torch.nn.Linear(dim, dim_output))
+        self.layers = net_layers
+        self.network = torch.nn.Sequential(*net_layers)
+
+    def forward(self, states):
+        return self.network(states)
+
 class FCNetwork_n(nn.Module):
     """
     A fully-connected network module
@@ -179,7 +202,7 @@ class StateGoalNetwork(nn.Module):
             self.net = CBCNetwork(dim_in, max_horizon, dim_out, layers=layers, add_conditioning=add_extra_conditioning,
                                   dropout=dropout)
         else:
-            self.net = FCNetwork_n(dim_in, dim_out, layers=layers)
+            self.net = FCNetwork(dim_in, dim_out, layers=layers)
 
     def forward(self, state, goal, horizon=None):
         state = self.state_embedding(state)
@@ -198,6 +221,54 @@ class StateGoalNetwork(nn.Module):
     def process_horizon(self, horizon):
         # Todo add format options
         return horizon
+
+class StateGoalNetwork_m(nn.Module):
+    def __init__(self, env, dim_out=1, state_embedding=None, goal_embedding=None, layers=[512, 512], max_horizon=None,
+                 freeze_embeddings=False, add_extra_conditioning=False, dropout=0):
+        super(StateGoalNetwork_m, self).__init__()
+        self.max_horizon = max_horizon
+        if state_embedding is None:
+            state_embedding = Flatten()
+        if goal_embedding is None:
+            goal_embedding = Flatten()
+
+        self.state_embedding = state_embedding
+        self.goal_embedding = goal_embedding
+        self.freeze_embeddings = freeze_embeddings
+
+        state_dim_in = self.state_embedding(torch.tensor(torch.zeros(env.observation_space.shape)[None])).size()[1]
+        goal_dim_in = self.goal_embedding(torch.tensor(torch.zeros(env.goal_space.shape)[None])).size()[1]
+
+        dim_in = state_dim_in
+
+        if max_horizon is not None:
+            pdb.set_trace()
+            self.net = CBCNetwork(dim_in, max_horizon, dim_out, layers=layers, add_conditioning=add_extra_conditioning,
+                                  dropout=dropout)
+        else:
+            self.net = FCNetwork_m(dim_in, dim_out, layers=layers)
+
+    def forward(self, state, goal, horizon=None):
+        state = self.state_embedding(state)
+        goal = self.goal_embedding(goal)
+        #embed = torch.cat((state, goal), dim=1)
+        embed = state
+        if self.freeze_embeddings:
+            embed = embed.detach()
+
+        if self.max_horizon is not None:
+            horizon = self.process_horizon(horizon)
+            output = self.net(embed, horizon)
+        else:
+            output = self.net(embed)
+        return output
+
+    def process_horizon(self, horizon):
+        # Todo add format options
+        return horizon
+
+
+
 
 class StateGoalNetwork_n(nn.Module):
     def __init__(self, env, dim_out=1, state_embedding=None, goal_embedding=None, layers=[512, 512], max_horizon=None,
@@ -292,16 +363,23 @@ class CrossEntropyLoss(nn.Module):
             return ce
 
 
-class DiscreteStochasticGoalPolicy(nn.Module, policy.GoalConditionedPolicy):
+class DiscreteStochasticGoalPolicy_m(nn.Module, policy.GoalConditionedPolicy):
     def __init__(self, env, **kwargs):
-        super(DiscreteStochasticGoalPolicy, self).__init__()
+        super(DiscreteStochasticGoalPolicy_m, self).__init__()
 
         self.action_space = env.action_space
         self.dim_out = env.action_space.n
         self.net = StateGoalNetwork(env, dim_out=self.dim_out, **kwargs)
-
+        self.marg_net = StateGoalNetwork_m(env, dim_out=self.dim_out , **kwargs)
+        self.t_marg_net = StateGoalNetwork_m(env, dim_out=self.dim_out , **kwargs)
     def forward(self, obs, goal, horizon=None):
         return self.net.forward(obs, goal, horizon=horizon)
+
+    def marg_forward(self,obs,goal,horizon = None):
+        return self.marg_net.forward(obs,goal, horizon = horizon)
+
+    def t_marg_forward(self,obs,goal,horizon = None):
+        return self.t_marg_net.forward(obs,goal, horizon = horizon)
 
     def act_vectorized(self, obs, goal, horizon=None, greedy=False, noise=0,
                        marginal_policy=None):
@@ -312,12 +390,22 @@ class DiscreteStochasticGoalPolicy(nn.Module, policy.GoalConditionedPolicy):
             horizon = torch.tensor(horizon, dtype=torch.float32)
 
         logits = self.forward(obs, goal, horizon=horizon)
-        if marginal_policy is not None:
-            dummy_goal = torch.zeros_like(goal)
-            marginal_logits = marginal_policy.forward(obs, dummy_goal, horizon)
-            logits -= marginal_logits
+        marginal_logits = self.t_marg_forward(obs, goal, horizon=horizon)
+        #logits -= marginal_logits
+        eps = 0.00001
+        eps1 = 0.00002
+        # logits -= marginal_logits
         noisy_logits = logits * (1 - noise)
-        probs = torch.softmax(noisy_logits, 1)
+        m_noisy_logits = marginal_logits * (1)
+        probs_sg = torch.softmax(noisy_logits, 1) + eps
+        probs_s = torch.softmax(m_noisy_logits, 1) + eps1
+        probs = torch.div(probs_sg, probs_s)
+        #pdb.set_trace()
+        probs = probs/torch.sum(probs,dim = 1)
+        #logits = torch.logit(probs,eps = 1e-6)
+        #noisy_logits = logits
+        #probs = torch.softmax(noisy_logits, 1)
+
         if greedy:
             samples = torch.argmax(probs, dim=-1)
         else:
@@ -326,7 +414,15 @@ class DiscreteStochasticGoalPolicy(nn.Module, policy.GoalConditionedPolicy):
 
     def nll(self, obs, goal, actions, horizon=None):
         logits = self.forward(obs, goal, horizon=horizon)
-        return CrossEntropyLoss(aggregate=None, label_smoothing=0)(logits, actions, weights=None, )
+        marginal_logits = self.marg_forward(obs, goal, horizon=horizon)
+        #pdb.set_trace()
+       # prob_logits = torch.softmax(logits,1)
+       # prob_marginal_logits = torch.softmax(marginal_logits,1)
+        #avg_prob = (prob_logits)*0.5 + (prob_marginal_logits)*0.5
+        #loss_logits = torch.logit(avg_prob,eps=1e-6)
+
+        return CrossEntropyLoss(aggregate=None, label_smoothing=0)(logits, actions, weights=None, ) + \
+               CrossEntropyLoss(aggregate=None, label_smoothing=0)(marginal_logits,actions,weights=None, )
 
     def probabilities(self, obs, goal, horizon=None):
         logits = self.forward(obs, goal, horizon=horizon)
@@ -342,6 +438,14 @@ class DiscreteStochasticGoalPolicy(nn.Module, policy.GoalConditionedPolicy):
     def process_horizon(self, horizon):
         return horizon
 
+    def soft_update(self,tau):
+        local_model = self.marg_net.net
+        target_model = self.t_marg_net.net
+
+        for target_param, local_param in zip(target_model.parameters(), local_model.parameters()):
+            target_param.data.copy_(tau*local_param.data + (1.0-tau)*target_param.data)
+
+
 class DiscreteStochasticGoalPolicy_n(nn.Module, policy.GoalConditionedPolicy):
     def __init__(self, env, **kwargs):
         super(DiscreteStochasticGoalPolicy_n, self).__init__()
@@ -349,7 +453,7 @@ class DiscreteStochasticGoalPolicy_n(nn.Module, policy.GoalConditionedPolicy):
         self.action_space = env.action_space
         self.dim_out = env.action_space.n
         self.net = StateGoalNetwork_n(env, dim_out=self.dim_out, **kwargs)
-
+        #self.marg_net = StateMargNetwork(env, dim_out=self.dim_out, **kwargs)
     def forward(self, obs, goal, horizon=None):
         return self.net.forward(obs, goal, horizon=horizon)
 
@@ -366,12 +470,11 @@ class DiscreteStochasticGoalPolicy_n(nn.Module, policy.GoalConditionedPolicy):
         eps = 0.00001
         eps1 = 0.00002
         #logits -= marginal_logits
-        noisy_logits = logits * (1 - noise )
-        m_noisy_logits = marginal_logits
+        noisy_logits = logits * (1 - noise)
+        m_noisy_logits = marginal_logits * (1)
         probs_sg = torch.softmax(noisy_logits, 1) + eps
         probs_s = torch.softmax(m_noisy_logits,1) + eps1
-        probs = torch.div(probs_sg,probs_s)
-        probs = probs/torch.sum(probs,dim = 1)
+        probs = torch.div(probs_sg,probs_s)/torch.sum(probs,dim = 1)
         if greedy:
             samples = torch.argmax(probs, dim=-1)
         else:
@@ -386,7 +489,6 @@ class DiscreteStochasticGoalPolicy_n(nn.Module, policy.GoalConditionedPolicy):
         prob_logits = torch.softmax(logits,1)
         prob_marginal_logits = torch.softmax(marginal_logits,1)
         avg_prob = (prob_logits + prob_marginal_logits)/2
-        #avg_prob = prob_logits
         loss_logits = torch.logit(avg_prob,eps=1e-6)
         if loss_logits.isinf().any():
             pdb.set_trace()
