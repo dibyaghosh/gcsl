@@ -42,7 +42,7 @@ dependencies:
     - ipdb==0.10.3
     - rospkg==1.1.4
     # mujoco-py<2.1,>=2.0
-    - mujoco_py==1.50.1.56
+    - mujoco-py<1.50.2,>=1.50.1
     - scikit-video
     - opencv-python
     - box2d-py
