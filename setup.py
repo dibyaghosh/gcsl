@@ -29,7 +29,7 @@ setuptools.setup(
     install_requires=[
         "box2d-py",
         "cloudpickle",
-        "gym",
+        "gym[box2d]",
         "ipython",
         "matplotlib",
         "mujoco_py",
